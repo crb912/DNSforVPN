@@ -1,0 +1,24 @@
+# --- 构建产物 ---
+# CLI 二进制 (go build -o dnsforvpn ./cmd/dnsforvpn/)
+/dnsforvpn
+# wails build 输出目录
+/build/
+# vite 构建输出 (wails build/dev 时重新生成, main.go embed)
+frontend/dist/
+
+# --- 前端依赖 ---
+frontend/node_modules/
+
+# --- 运行时数据 ---
+# BoltDB 缓存库 (dns_cache.db, 含缓存与自定义 DNS)
+/data/
+# GFWList 规则文件, 缺失时 router.New 自动下载
+/gfwlist.txt
+
+# --- Go ---
+*.exe
+*.test
+*.out
+
+# --- OS ---
+.DS_Store

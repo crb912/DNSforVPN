@@ -1,0 +1,39 @@
+---
+
+DNSforVPN project: DNS-over-HTTPS proxy with Wails v2 + Svelte GUI
+
+Module: doh-dns-proxy, workspace: /home/raybing/Desktop/github/DNSforVPN
+Go 1.25 toolchain (go.mod says 1.22), linux/amd64, Ubuntu 24.04
+
+状态 (2026-07-17): 全部功能完成并验证 — 后端六层 + 5 面板 GUI + 自定义 DNS。
+用户已日常运行: config.toml port=1553 (免 sudo), dig 实测覆盖/上游均正常。
+
+Architecture (5 layers + router):
+- internal/dns: wire-format parse/build — 17 tests (含 CNAME rdata 终止符回归)
+- internal/router: GFWList 路由, Route() → RouteResult — 16 tests
+- internal/cache: Cache(Get/Set/Del/List) + CustomStore(bucket "custom",
+  CustomEntry{Domain, IPs}) + NegativeCache, BoltDB 单文件双 bucket — 20 tests
+- internal/upstream: Resolver + doh/udp Client + Manager
+  (ResolveAll 聚合 + reduce 按 Name|Type|RData 去重) — 4 tests
+- internal/query: Service.Handle 管线: 1b custom 覆盖(最高优先) → route →
+  inflight dedup → negCache → cache → upstream; New(c, nc, r, u, cs)
+- internal/transport: UDPServer
+
+Root: main.go (Wails, embed frontend/dist + AssetServer),
+app.go (13 Bind 方法, withStore: running 用活句柄/stopped 临时开库),
+cmd/dnsforvpn/main.go (CLI headless)
+
+Frontend (Svelte 4, 5 tab): Config/Latency/Stats/Cache/CustomDNS 面板,
+wailsjs 绑定由 wails dev 自动生成。
+
+关键坑 (详见 TODO.md 运维要点):
+- BoltDB 单句柄: 服务运行时 GUI 面板会锁超时; 覆盖实时读库免重启
+- data/ 必须 raybing 所有 (已 chown); 53 端口用 setcap 勿 sudo
+- wails dev/build 必须 -tags webkit2_41 (Ubuntu 24.04, 依赖已装)
+- App Bind 返回 slice 必须 make([]T,0), nil → JSON null 崩 Svelte
+- gofmt 剩 5 文件未清 (见 TODO); wails go.mod v2.9.2 vs CLI v2.13.0
+
+Next session first command:
+  go build -o dnsforvpn ./cmd/dnsforvpn/ && ./dnsforvpn   # port 1553
+  或 wails dev -tags webkit2_41
+待办首位: 修正面板中 porhub.com → pornhub.com (拼写)。

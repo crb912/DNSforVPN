@@ -2,45 +2,61 @@ package main
 
 import (
 	"context"
+	"embed"
+	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
+
+	"github.com/BurntSushi/toml"
+	"github.com/wailsapp/wails/v2"
+	"github.com/wailsapp/wails/v2/pkg/options"
+	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 )
 
+//go:embed all:frontend/dist
+var assets embed.FS
+
 func main() {
-	// Initialize global configuration and components
-	InitGlobals()
-	
-	// Create DNS server
-	server, err := NewDNSServer()
+	// Load initial config.
+	cfg, err := loadAppConfig("config.toml")
 	if err != nil {
-		MainLog.Fatalf("Failed to create DNS server: %v", err)
+		slog.Error("failed to load config", "err", err)
+		os.Exit(1)
 	}
-	defer server.Close()
-	
-	// Create context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	
-	// Handle shutdown signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	
-	// Start server in goroutine
-	go func() {
-		if err := server.Start(ctx); err != nil && err != context.Canceled {
-			MainLog.Errorf("Server error: %v", err)
-		}
-	}()
-	
-	// Wait for shutdown signal
-	<-sigChan
-	MainLog.Info("Shutdown signal received, stopping server...")
-	cancel()
-	
-	// Save caches before exit
-	CacheDB.Save()
-	NegativeCache.Save()
-	
-	MainLog.Info("Server shutdown complete")
+
+	app := &App{
+		ctx:    context.Background(),
+		config: cfg,
+	}
+
+	err = wails.Run(&options.App{
+		Title:  "DNSforVPN",
+		Width:  960,
+		Height: 680,
+		AssetServer: &assetserver.Options{
+			Assets: assets,
+		},
+		OnStartup: func(ctx context.Context) {
+			app.ctx = ctx
+			slog.Info("DNSforVPN UI started")
+		},
+		OnShutdown: func(ctx context.Context) {
+			app.Stop()
+		},
+		Bind: []interface{}{
+			app,
+		},
+	})
+
+	if err != nil {
+		slog.Error("wails run failed", "err", err)
+		os.Exit(1)
+	}
+}
+
+func loadAppConfig(path string) (Config, error) {
+	var cfg Config
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
 }
