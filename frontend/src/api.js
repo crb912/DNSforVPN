@@ -21,6 +21,8 @@ export const GetStatus = () => req('GET', '/api/status');
 export const Start = () => req('POST', '/api/start');
 export const Stop = () => req('POST', '/api/stop');
 export const CheckLatency = () => req('GET', '/api/latency');
+export const CheckServersLatency = (servers) =>
+  req('POST', '/api/latency', { servers });
 export const GetCacheStats = () => req('GET', '/api/stats/cache');
 export const GetQueryStats = () => req('GET', '/api/stats/query');
 export const ListCache = () => req('GET', '/api/cache');

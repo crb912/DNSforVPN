@@ -47,6 +47,7 @@ func (s *Server) Start() error {
 	mux.HandleFunc("POST /api/start", s.handleStart)
 	mux.HandleFunc("POST /api/stop", s.handleStop)
 	mux.HandleFunc("GET /api/latency", s.handleLatency)
+	mux.HandleFunc("POST /api/latency", s.handleLatencyCheck)
 	mux.HandleFunc("GET /api/stats/cache", s.handleCacheStats)
 	mux.HandleFunc("GET /api/stats/query", s.handleQueryStats)
 	mux.HandleFunc("GET /api/cache", s.handleCache)
@@ -125,6 +126,19 @@ func (s *Server) handleStop(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleLatency(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, s.ctl.CheckLatency())
+}
+
+// handleLatencyCheck probes an explicit list of DoH servers (the latency
+// panel's catalog), so the UI can measure more than the configured set.
+func (s *Server) handleLatencyCheck(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Servers []control.LatencyTarget `json:"servers"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, s.ctl.CheckServersLatency(req.Servers))
 }
 
 func (s *Server) handleCacheStats(w http.ResponseWriter, _ *http.Request) {

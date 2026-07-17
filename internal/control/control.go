@@ -282,11 +282,33 @@ func (c *Control) Stop() {
 	slog.Info("DNS server stopped")
 }
 
+// LatencyTarget names one DoH server to probe. ViaProxy routes the probe
+// through the configured proxy (for the "Proxy" group in the UI).
+type LatencyTarget struct {
+	URL      string `json:"url"`
+	ViaProxy bool   `json:"via_proxy"`
+}
+
 // CheckLatency performs health checks on all configured DoH servers.
-// Clients are cached across calls so the underlying keep-alive HTTP
-// connections are reused — after the first (cold) probe, results reflect
-// warm-connection latency.
 func (c *Control) CheckLatency() []upstream.ServerLatency {
+	cfg := c.GetConfig()
+	targets := make([]LatencyTarget, 0, len(cfg.DOHServers.DirectServers)+len(cfg.DOHServers.ProxyServers))
+	for _, s := range cfg.DOHServers.DirectServers {
+		targets = append(targets, LatencyTarget{URL: s})
+	}
+	for _, s := range cfg.DOHServers.ProxyServers {
+		targets = append(targets, LatencyTarget{URL: s, ViaProxy: true})
+	}
+	return c.CheckServersLatency(targets)
+}
+
+// CheckServersLatency probes the given targets concurrently. DoH clients
+// are cached across calls (keyed by serverURL|proxyURL) so the underlying
+// keep-alive HTTP connections are reused — after the first (cold) probe,
+// results reflect warm-connection latency. Targets marked ViaProxy are
+// probed through the configured proxy; when no proxy is configured they
+// immediately report an error instead of silently going direct.
+func (c *Control) CheckServersLatency(targets []LatencyTarget) []upstream.ServerLatency {
 	c.mu.Lock()
 	cfg := c.config
 
@@ -298,7 +320,7 @@ func (c *Control) CheckLatency() []upstream.ServerLatency {
 		}
 	}
 
-	// Prune clients for servers no longer configured.
+	// Prune clients no longer referenced by config or this request.
 	want := make(map[string]bool)
 	for _, s := range cfg.DOHServers.DirectServers {
 		want[s+"|"] = true
@@ -306,39 +328,69 @@ func (c *Control) CheckLatency() []upstream.ServerLatency {
 	for _, s := range cfg.DOHServers.ProxyServers {
 		want[s+"|"+proxyURL] = true
 	}
+	for _, t := range targets {
+		want[t.URL+"|"+proxyFor(t, proxyURL)] = true
+	}
 	for k := range c.healthClients {
 		if !want[k] {
 			delete(c.healthClients, k)
 		}
 	}
 
-	clientFor := func(server, proxy string) *doh.Client {
-		k := server + "|" + proxy
+	type probe struct {
+		cl  *doh.Client
+		url string // set when cl is nil (proxy requested but not configured)
+	}
+	probes := make([]probe, 0, len(targets))
+	seen := make(map[string]bool)
+	for _, t := range targets {
+		if t.URL == "" {
+			continue
+		}
+		if t.ViaProxy && proxyURL == "" {
+			probes = append(probes, probe{url: t.URL})
+			continue
+		}
+		p := proxyFor(t, proxyURL)
+		k := t.URL + "|" + p
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
 		cl, ok := c.healthClients[k]
 		if !ok {
-			cl = doh.New(server, proxy)
+			cl = doh.New(t.URL, p)
 			c.healthClients[k] = cl
 		}
-		return cl
-	}
-
-	clients := make([]*doh.Client, 0, len(cfg.DOHServers.DirectServers)+len(cfg.DOHServers.ProxyServers))
-	for _, s := range cfg.DOHServers.DirectServers {
-		clients = append(clients, clientFor(s, ""))
-	}
-	for _, s := range cfg.DOHServers.ProxyServers {
-		clients = append(clients, clientFor(s, proxyURL))
+		probes = append(probes, probe{cl: cl})
 	}
 	c.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	all := make([]upstream.ServerLatency, 0, len(clients))
-	for _, cl := range clients {
-		all = append(all, cl.HealthCheck(ctx))
+	all := make([]upstream.ServerLatency, len(probes))
+	var wg sync.WaitGroup
+	for i, pr := range probes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if pr.cl == nil {
+				all[i] = upstream.ServerLatency{ServerURL: pr.url, Status: "error"}
+				return
+			}
+			all[i] = pr.cl.HealthCheck(ctx)
+		}()
 	}
+	wg.Wait()
 	return all
+}
+
+func proxyFor(t LatencyTarget, proxyURL string) string {
+	if t.ViaProxy {
+		return proxyURL
+	}
+	return ""
 }
 
 // GetCacheStats returns cache-layer statistics.
