@@ -1,0 +1,49 @@
+# dnsforvpn — OpenWrt default configuration.
+#
+# DNS listens on 127.0.0.1:1553 so it does not fight dnsmasq for port 53.
+# To route all LAN DNS through dnsforvpn, forward dnsmasq to it:
+#   uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#1553'
+#   uci set dhcp.@dnsmasq[0].noresolv='1'
+#   uci commit dhcp && /etc/init.d/dnsmasq restart
+#
+# Web UI listens on 0.0.0.0:8080 (reachable from the LAN) —
+# set [web] password before exposing it.
+
+[doh_servers]
+direct_servers = [
+    "https://doh.pub/dns-query",       # Tencent
+    "https://dns.alidns.com/dns-query" # Ali
+]
+proxy_servers = [
+    "https://dns.google/dns-query",    # Google
+    "https://1.1.1.1/dns-query",       # Cloudflare
+]
+bootstrap_server = "223.5.5.5"
+
+[dns]
+host = "127.0.0.1"
+port = 1553
+
+[cache]
+# 相对路径按本文件所在目录 (/etc/dnsforvpn) 解析
+db_path = "data/dns_cache.db"
+max_hot_size = 100000
+save_interval = 72  # hours
+
+[proxy]
+# Set enable_proxy = true and fill in your proxy if proxy_servers must
+# be reached through a local HTTP/SOCKS proxy.
+enable_proxy = false
+http = ""
+https = ""
+rule_file = "rules/gfwlist.txt"
+rule_file_url = "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt"
+
+[web]
+host = "0.0.0.0"
+port = 8080
+username = ""
+password = ""  # SET THIS — the UI can change DNS for the whole network
+
+[logging]
+level = "info"

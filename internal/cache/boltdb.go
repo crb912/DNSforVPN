@@ -25,11 +25,11 @@ const (
 // boltCache implements Cache backed by BoltDB on disk and a sync.Map hot
 // cache in memory. Hot entries are loaded lazily on first access.
 type boltCache struct {
-	db      *bolt.DB
-	hot     sync.Map       // map[string]*hotEntry
-	hits    atomic.Uint64  // total cache hits
-	misses  atomic.Uint64  // total cache misses
-	size    atomic.Int64   // current entry count (approximate)
+	db     *bolt.DB
+	hot    sync.Map      // map[string]*hotEntry
+	hits   atomic.Uint64 // total cache hits
+	misses atomic.Uint64 // total cache misses
+	size   atomic.Int64  // current entry count (approximate)
 }
 
 type hotEntry struct {

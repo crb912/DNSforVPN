@@ -1,39 +1,42 @@
 ---
 
-DNSforVPN project: DNS-over-HTTPS proxy with Wails v2 + Svelte GUI
+DNSforVPN project: DNS-over-HTTPS proxy, 单二进制 + 内嵌 Web UI (PWA)
 
-Module: doh-dns-proxy, workspace: /home/raybing/Desktop/github/DNSforVPN
-Go 1.25 toolchain (go.mod says 1.22), linux/amd64, Ubuntu 24.04
+Module: doh-dns-proxy, workspace: /home/raybing/Desktop/github/DNSforVPN (Linux)
+/ C:/Users/Bing/Desktop/git/DNSforVPN (Windows)
+Go 1.25+ toolchain (go.mod 1.22+), 纯 Go 零 CGO, 全平台交叉编译一条命令。
 
-状态 (2026-07-17): 全部功能完成并验证 — 后端六层 + 5 面板 GUI + 自定义 DNS。
-用户已日常运行: config.toml port=1553 (免 sudo), dig 实测覆盖/上游均正常。
+状态 (2026-07-17): **Wails 已移除**, 架构迁移为 AdGuard Home 模式 —
+一个二进制 = DNS server + Web UI (REST + embed SPA) + 系统服务管理。
+Model B: DNS 由系统服务保活 (kardianos/service: SCM/launchd/systemd;
+OpenWrt 用 procd), 桌面图标只是打开 http://127.0.0.1:8080 的启动器。
+全部验证通过: 测试/curl 12 端点/dnsprobe 自定义覆盖+缓存命中/
+Basic Auth/6 平台交叉编译/ipk 组装结构。
 
-Architecture (5 layers + router):
-- internal/dns: wire-format parse/build — 17 tests (含 CNAME rdata 终止符回归)
-- internal/router: GFWList 路由, Route() → RouteResult — 16 tests
-- internal/cache: Cache(Get/Set/Del/List) + CustomStore(bucket "custom",
-  CustomEntry{Domain, IPs}) + NegativeCache, BoltDB 单文件双 bucket — 20 tests
-- internal/upstream: Resolver + doh/udp Client + Manager
-  (ResolveAll 聚合 + reduce 按 Name|Type|RData 去重) — 4 tests
-- internal/query: Service.Handle 管线: 1b custom 覆盖(最高优先) → route →
-  inflight dedup → negCache → cache → upstream; New(c, nc, r, u, cs)
-- internal/transport: UDPServer
+Architecture (原五层不变 + 新三层):
+- internal/dns router cache upstream query transport  # 核心管线, 未动
+- internal/control   # 控制层 (ex-app.go): 配置 + 生命周期; 相对路径按
+                     # 配置文件目录解析; Start 自动 MkdirAll
+- internal/web       # 12 REST 端点 + embed SPA (fallback+api404) + Basic Auth
+- internal/browser   # xdg-open/open/rundll32
+- frontend/          # Svelte 4, src/api.js fetch 封装 (沿用旧绑定名),
+                     # public/ PWA (manifest+sw.js+icons), embed.go 嵌 dist
+- tools/             # genicons / dnsprobe / mkipk(免 SDK 纯 Go 打 ipk)
+- deploy/            # openwrt(build-ipk.sh+procd) windows(NSIS+ico)
+                     # linux(install.sh+desktop) macos(make-app.sh)
 
-Root: main.go (Wails, embed frontend/dist + AssetServer),
-app.go (13 Bind 方法, withStore: running 用活句柄/stopped 临时开库),
-cmd/dnsforvpn/main.go (CLI headless)
-
-Frontend (Svelte 4, 5 tab): Config/Latency/Stats/Cache/CustomDNS 面板,
-wailsjs 绑定由 wails dev 自动生成。
-
-关键坑 (详见 TODO.md 运维要点):
-- BoltDB 单句柄: 服务运行时 GUI 面板会锁超时; 覆盖实时读库免重启
-- data/ 必须 raybing 所有 (已 chown); 53 端口用 setcap 勿 sudo
-- wails dev/build 必须 -tags webkit2_41 (Ubuntu 24.04, 依赖已装)
-- App Bind 返回 slice 必须 make([]T,0), nil → JSON null 崩 Svelte
-- gofmt 剩 5 文件未清 (见 TODO); wails go.mod v2.9.2 vs CLI v2.13.0
+关键坑 (详见 TODO.md):
+- 布局: configs/{config.toml, rules/(种子入库), data/(运行时忽略)};
+  db 不进包; gfwlist 种子随包携带 (离线首启)
+- BoltDB 单句柄; 服务模式路径按配置文件目录解析
+- Web 监听非回环必须设 [web] password (Basic Auth)
+- Windows: Git Bash kill 杀不掉原生 exe → taskkill //F //IM;
+  nslookup -port 无效 → 用 tools/dnsprobe
+- npm run build 先于 go build (embed); 空 slice 必须 make([]T,0)
+- sw.js 只缓存静态, /api 不缓存; 升级 PWA 缓存改 CACHE 版本号
 
 Next session first command:
-  go build -o dnsforvpn ./cmd/dnsforvpn/ && ./dnsforvpn   # port 1553
-  或 wails dev -tags webkit2_41
-待办首位: 修正面板中 porhub.com → pornhub.com (拼写)。
+  cd frontend && npm run build && cd .. && go build -o dnsforvpn ./cmd/dnsforvpn && ./dnsforvpn
+  # OpenWrt: deploy/openwrt/build-ipk.sh arm64
+待办首位: L3 系统托盘评估 (注意 systray 在 Linux 引入 CGO);
+OpenWrt/NSIS/macOS 实机验证 (详见 .ai/TODO.md)。

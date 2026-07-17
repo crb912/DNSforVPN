@@ -1,0 +1,6 @@
+#!/bin/sh
+# prerm: runs before package removal.
+[ -n "$IPKG_INSTROOT" ] && exit 0
+/etc/init.d/dnsforvpn stop 2>/dev/null
+/etc/init.d/dnsforvpn disable 2>/dev/null
+exit 0

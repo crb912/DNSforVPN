@@ -1,19 +1,21 @@
 # --- 构建产物 ---
-# CLI 二进制 (go build -o dnsforvpn ./cmd/dnsforvpn/)
+# 主二进制 (go build -o dnsforvpn ./cmd/dnsforvpn/)
 /dnsforvpn
-# wails build 输出目录
-/build/
-# vite 构建输出 (wails build/dev 时重新生成, main.go embed)
-frontend/dist/
+# OpenWrt ipk 输出 (deploy/openwrt/build-ipk.sh)
+/*.ipk
+# macOS .app 输出 (deploy/macos/make-app.sh)
+/DNSforVPN.app
+# vite 构建输出 (main 通过 frontend/embed.go 内嵌; 保留占位 index.html 使裸克隆可编译)
+frontend/dist/*
+!frontend/dist/index.html
 
 # --- 前端依赖 ---
 frontend/node_modules/
 
 # --- 运行时数据 ---
-# BoltDB 缓存库 (dns_cache.db, 含缓存与自定义 DNS)
-/data/
-# GFWList 规则文件, 缺失时 router.New 自动下载
-/gfwlist.txt
+# BoltDB 缓存库 (configs/data/dns_cache.db, 含缓存与自定义 DNS) — 运行时生成
+configs/data/
+# GFWList 种子文件 configs/rules/gfwlist.txt 随仓库/安装包携带, 不再忽略
 
 # --- Go ---
 *.exe

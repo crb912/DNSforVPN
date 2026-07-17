@@ -5,61 +5,80 @@
 ## 项目结构
 
 ```
-dnsforvpn/                          # module: doh-dns-proxy, go 1.22
-├── cmd/dnsforvpn/main.go           # CLI 入口（无 GUI 模式）
-├── main.go                         # Wails 入口 (wails.Run)
-├── app.go                          # Wails App struct, Bind 方法
-├── wails.json                      # Wails v2 项目配置
-├── config.toml                     # 运行时配置
-├── TODO.md                         # 待办清单
-├── ARCHITECTURE.md                 # ← 本文件
+dnsforvpn/                          # module: doh-dns-proxy, go 1.22+
+├── cmd/dnsforvpn/main.go           # 唯一入口: run (前台/服务) + service 子命令
+├── configs/                        # 配置根目录 (单目录布局, 打包携带前两项)
+│   ├── config.toml                 #   主配置 (含 [web] 段)
+│   ├── rules/gfwlist.txt           #   规则种子 (随包携带, 离线可启动)
+│   └── data/                       #   运行时数据 (BoltDB; gitignore, 不打包)
 │
 ├── internal/
 │   ├── dns/                        # DNS wire-format (纯函数, 零状态)
 │   │   ├── types.go                #   常量 + Query, Result, RRRecord
-│   │   ├── parse.go                #   ParseQuery, ParseResponse (+ 内部解析器)
+│   │   ├── parse.go                #   ParseQuery, ParseResponse
 │   │   ├── build.go                #   BuildResponse, BuildErrorResponse, BuildQuery
-│   │   └── dns_test.go             #   16 tests
+│   │   └── dns_test.go             #   17 tests
 │   │
 │   ├── router/                     # 域名路由决策 (横向层)
 │   │   ├── router.go               #   Router struct + GFWList 解析
 │   │   └── router_test.go          #   16 tests
 │   │
 │   ├── cache/                      # 缓存层
-│   │   ├── cache.go                #   Cache 接口 + Entry, Stats, CacheItem
-│   │   ├── boltdb.go               #   boltCache (BoltDB + sync.Map hot cache), 实现 CustomStore
-│   │   ├── custom.go               #   CustomEntry + CustomStore 接口 (自定义 DNS 覆盖)
+│   │   ├── cache.go                #   Cache 接口 + Entry, Stats(带 json tag), CacheItem
+│   │   ├── boltdb.go               #   boltCache (BoltDB + sync.Map hot cache)
+│   │   ├── custom.go               #   CustomEntry + CustomStore 接口
 │   │   ├── negative.go             #   NegativeCache (NXDOMAIN)
 │   │   └── cache_test.go           #   20 tests
 │   │
 │   ├── upstream/                   # 上游协议层
 │   │   ├── resolver.go             #   Resolver 接口 + Result, StatsSnapshot, ServerLatency
 │   │   ├── manager.go              #   Manager: 并发多服务器编排 (方案B)
-│   │   ├── doh/
-│   │   │   ├── client.go           #   DoH Client (single-server POST)
-│   │   │   └── tcp_ping.go         #   TCP ping 延迟探测
-│   │   └── udp/
-│   │       └── client.go           #   UDP Client (bootstrap)
+│   │   ├── doh/                    #   DoH Client + TCP ping
+│   │   └── udp/                    #   UDP Client (bootstrap)
 │   │
 │   ├── query/                      # 查询管线编排
 │   │   └── service.go              #   Service + inflight dedup
 │   │
-│   └── transport/                  # 网络传输层
-│       └── udp.go                  #   UDPServer
+│   ├── transport/                  # 网络传输层
+│   │   └── udp.go                  #   UDPServer
+│   │
+│   ├── control/                    # 控制层 (平台无关, ex-app.go 剥离 Wails)
+│   │   └── control.go              #   Control: Config + DNS 生命周期 + 全部业务方法
+│   │
+│   ├── web/                        # Web 层
+│   │   └── server.go               #   REST API (/api/*) + embed SPA + Basic Auth
+│   │
+│   └── browser/                    # 浏览器启动
+│       └── browser.go              #   Open(url): rundll32/open/xdg-open
 │
-└── frontend/                       # Wails 前端 (Svelte 4 + Vite 5)
-    ├── package.json
-    ├── vite.config.js
-    ├── index.html
-    └── src/
-        ├── main.js
-        ├── App.svelte              # 主框架 (Tab: Status/Config/Stats/Cache/Custom DNS)
-        └── lib/
-            ├── ConfigPanel.svelte  # 服务器/缓存/代理配置
-            ├── LatencyPanel.svelte # 延迟监控 (5s 轮询)
-            ├── StatsPanel.svelte   # QPS/缓存仪表盘
-            ├── CachePanel.svelte   # 缓存浏览 (搜索/刷新, 含过期状态)
-            └── CustomDNSPanel.svelte # 自定义域名→IP 覆盖管理
+├── frontend/                       # Web 前端 (Svelte 4 + Vite 5)
+│   ├── embed.go                    #   //go:embed all:dist (产物内嵌进二进制)
+│   ├── package.json / vite.config.js / index.html
+│   ├── public/
+│   │   ├── manifest.webmanifest    #   PWA manifest
+│   │   ├── sw.js                   #   service worker (静态缓存, /api 直通)
+│   │   └── icons/                  #   genicons 生成的 PNG 图标
+│   └── src/
+│       ├── main.js                 #   入口 + 注册 service worker
+│       ├── api.js                  #   fetch 封装 (方法名沿用旧 Wails 绑定)
+│       ├── App.svelte              #   主框架 (5 Tab)
+│       └── lib/
+│           ├── ConfigPanel.svelte  #   配置编辑 (含 Web UI 段)
+│           ├── LatencyPanel.svelte #   延迟监控 (5s 轮询)
+│           ├── StatsPanel.svelte   #   QPS/缓存仪表盘
+│           ├── CachePanel.svelte   #   缓存浏览
+│           └── CustomDNSPanel.svelte # 自定义域名→IP 覆盖
+│
+├── tools/
+│   ├── genicons/main.go            # 程序化生成图标 (PNG + ICO, 4x 超采样)
+│   ├── dnsprobe/main.go            # UDP DNS 探测 (替代不可靠的 nslookup -port)
+│   └── mkipk/main.go               # 免 SDK 组装 OpenWrt .ipk (纯 Go ar+tar.gz)
+│
+└── deploy/
+    ├── openwrt/                    # build-ipk.sh + control + procd init + postinst/prerm + 路由器 config
+    ├── windows/                    # installer.nsi + dnsforvpn.ico
+    ├── linux/                      # install.sh / uninstall.sh + dnsforvpn.desktop
+    └── macos/                      # make-app.sh (web UI launcher .app)
 ```
 
 ---
@@ -311,43 +330,63 @@ func (s *UDPServer) Close() error
 
 ---
 
-## 二、Wails App 绑定方法
+## 二、控制层与 Web API
+
+### 2.1 `internal/control` — 平台无关控制层
 
 ```go
-// app.go
-type App struct {
-    ctx     context.Context
-    mu      sync.Mutex
-    config  Config
-    svc     *query.Service
-    srv     *transport.UDPServer
-    cancel  context.CancelFunc
-    running bool
-}
+// control.go — 全部业务逻辑, 被 CLI 和 web 层共用
+type Control struct { /* cfgPath, cfgDir, mu, config, svc, srv, cache, custom, cancel, running */ }
 
-// 以下方法被 Wails Bind 到前端 (window.go.main.App.*)
-func (a *App) GetConfig() Config
-func (a *App) SaveConfig(cfg Config) error          // 写入 config.toml
-func (a *App) GetStatus() string                     // "running" | "stopped"
-func (a *App) Start() error                          // 装配全部依赖 + 启动 DNS 服务器
-func (a *App) Stop()                                 // 优雅停止
-func (a *App) CheckLatency() []upstream.ServerLatency // 所有 DoH 服务器延迟
-func (a *App) GetCacheStats() cache.Stats
-func (a *App) GetQueryStats() query.Stats
-
-// 缓存浏览 (running 用活句柄, stopped 临时打开 DB)
-func (a *App) ListCache() ([]CacheEntryView, error)         // 全量, cap 500, 按域名排序
-func (a *App) QueryCache(domain string) ([]CacheEntryView, error)
-
-// 自定义 DNS 覆盖
-func (a *App) GetCustomDNS() ([]CustomDNSEntry, error)
-func (a *App) SetCustomDNS(domain string, ips []string) error  // 校验 IP 格式
-func (a *App) DeleteCustomDNS(domain string) error
+func New(cfgPath string) (*Control, error)  // 加载配置, 记录配置文件目录
+func (c *Control) GetConfig() Config
+func (c *Control) SaveConfig(cfg Config) error          // 写入原配置文件
+func (c *Control) GetStatus() string                     // "running" | "stopped"
+func (c *Control) Start() error                          // 装配全部依赖 + 启动 DNS
+func (c *Control) Stop()                                 // 优雅停止
+func (c *Control) CheckLatency() []upstream.ServerLatency   // 探测客户端按 server|proxy 缓存复用 (keep-alive 热连接)
+func (c *Control) GetCacheStats() cache.Stats
+func (c *Control) GetQueryStats() query.Stats
+func (c *Control) ListCache() ([]CacheEntryView, error)         // cap 500
+func (c *Control) QueryCache(domain string) ([]CacheEntryView, error)
+func (c *Control) GetCustomDNS() ([]CustomDNSEntry, error)
+func (c *Control) SetCustomDNS(domain string, ips []string) error
+func (c *Control) DeleteCustomDNS(domain string) error
 ```
+
+要点: 配置中的相对路径 (db_path/rule_file) 相对**配置文件目录**解析
+(`resolve()`), 系统服务任意 cwd 下行为一致; `Start()` 自动 `MkdirAll` DB 目录;
+`withStore` 在 stopped 时临时开库 (BoltDB 单句柄约束)。
+
+### 2.2 REST API (`internal/web`, Go 1.22 ServeMux)
+
+```
+GET    /api/config              → control.Config (JSON)
+PUT    /api/config              body=Config → 保存写盘
+GET    /api/status              → "running" | "stopped"
+POST   /api/start               → 启动 DNS → status
+POST   /api/stop                → 停止 DNS → status
+GET    /api/latency             → []ServerLatency (全部 DoH 服务器)
+GET    /api/stats/cache         → cache.Stats
+GET    /api/stats/query         → query.Stats
+GET    /api/cache?domain=       → []CacheEntryView (domain 为空 = 全量, cap 500)
+GET    /api/custom-dns          → []CustomDNSEntry
+PUT    /api/custom-dns          body={domain, ips} → 校验 IP 后写入
+DELETE /api/custom-dns?domain=  → 删除
+GET    /*                       → embed SPA (frontend/dist); 未知路径回退 index.html;
+                                  未匹配的 /api/* 返回 404
+```
+
+- **鉴权**: `[web] password` 非空 → 全部请求要求 HTTP Basic Auth
+  (username 可空=不校验; subtle.ConstantTimeCompare 比对)
+- **错误**: 500 + 纯文本错误信息; 空集合一律返回 `[]` (非 null)
+- **静态**: `http.FileServerFS` + SPA fallback; `.webmanifest` 显式注册 MIME
 
 ---
 
 ## 三、config.toml 格式
+
+位于 `configs/config.toml`; 其中相对路径 (db_path/rule_file) 相对 configs/ 解析。
 
 ```toml
 [doh_servers]
@@ -368,8 +407,14 @@ save_interval = 72
 enable_proxy = true
 http = "http://192.168.5.8:7899"
 https = "http://192.168.5.8:7899"
-rule_file = "gfwlist.txt"
+rule_file = "rules/gfwlist.txt"
 rule_file_url = "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt"
+
+[web]
+host = "127.0.0.1"   # 桌面默认仅回环; 路由器改 0.0.0.0 并设密码
+port = 8080
+username = ""
+password = ""        # 非空 → HTTP Basic Auth
 
 [logging]
 level = "info"
@@ -381,25 +426,28 @@ level = "info"
 
 ```
 go.mod:
-  github.com/BurntSushi/toml v1.3.2     # 配置解析
-  github.com/wailsapp/wails/v2 v2.9.2   # GUI 框架
-  go.etcd.io/bbolt v1.3.11              # 缓存存储
+  github.com/BurntSushi/toml v1.3.2      # 配置解析
+  go.etcd.io/bbolt v1.3.11               # 缓存存储
+  github.com/kardianos/service v1.2.2    # 系统服务 (SCM/launchd/systemd)
 ```
 
 **包依赖图**:
 ```
 cmd/dnsforvpn/main.go
-  └── Config → transport.UDPServer
-                 └── query.Service.Handle()
-                       ├── dns.ParseQuery / BuildResponse / BuildErrorResponse
-                       ├── router.Route() → RouteResult
-                       ├── cache.Get / Set / NegativeCache
-                       └── upstream.Manager.ResolveAll()
-                             ├── upstream/doh.Client.Resolve()
-                             └── upstream/udp.Client.Resolve()  (bootstrap)
-
-main.go → wails.Run()
-  └── app.go → App.Start() → 同上装配链
+  ├── internal/control  (Config + DNS 生命周期)
+  │     ├── internal/cache     (Get, Set, List, NegativeCache, CustomStore)
+  │     ├── internal/router    (Route)
+  │     ├── internal/query     (Service.Handle)
+  │     │     └── internal/dns (ParseQuery, BuildResponse)
+  │     ├── internal/transport (UDPServer)
+  │     └── internal/upstream  (Manager.ResolveAll)
+  │           ├── internal/upstream/doh
+  │           └── internal/upstream/udp
+  ├── internal/web      (REST API + SPA)
+  │     ├── internal/control
+  │     └── frontend          (//go:embed all:dist)
+  ├── internal/browser  (打开默认浏览器)
+  └── github.com/kardianos/service
 ```
 
 ---
@@ -408,13 +456,20 @@ main.go → wails.Run()
 
 | 决策 | 理由 |
 |------|------|
-| BoltDB 而非 LMDB | 纯 Go 无 CGo, Wails 交叉编译友好 |
+| 单二进制 + 内嵌 Web UI | AdGuard Home 模式: 桌面/路由器同一形态, 无显示环境依赖 |
+| ~~Wails GUI~~ → REST + SPA | 路由器无窗口系统; 浏览器即 UI; 砍掉 GTK/WebKit 依赖与版本对齐负担 |
+| Model B 服务常驻 | DNS 停了=断网, 必须由系统服务保活; 桌面图标只是 UI 启动器 |
+| kardianos/service | 纯 Go 封装 SCM/launchd/systemd; OpenWrt 另用 procd (其不支持) |
+| 路径按配置文件目录解析 | 服务模式 cwd 不确定, 保证行为一致 |
+| Basic Auth 而非自研登录页 | 浏览器原生弹窗, 前端零代码; 局域网场景足够 |
+| BoltDB 而非 LMDB | 纯 Go 无 CGO, 交叉编译友好 |
 | gob 编码而非 JSON/protobuf | 比 JSON 快, 无 protobuf 依赖 |
 | sync.Map 热缓存 | 读多写少, 懒加载: 首次 Get 触发一次读盘 |
 | 并发编排在 Manager | 方案B: 协议层单一职责, Manager 控制并发策略 |
-| Wails v2 而非 v3 | v3 alpha, v2 稳定生产就绪 |
 | 标准库 slog 替代 logrus | 减少外部依赖, Go 1.21+ 内置 |
 | inflight dedup | sync.Map + chan: 无锁竞争, 5 个并发请求只发 1 次上游 |
+| PWA | manifest+sw.js 几十行换"准原生"桌面形态; API 不走缓存 |
+| mkipk 纯 Go 打 ipk | 构建机 (Windows) 无 binutils/OpenWrt SDK; ar 格式手工写 |
 
 ---
 
@@ -477,7 +532,9 @@ dig @127.0.0.1 google.com A
 - Save Config → SaveConfig() → 写入 config.toml
 
 ### LatencyPanel
-- 每 5 秒轮询 CheckLatency()
+- 标题 "DNS Server Latency"; 每 5 秒轮询 CheckLatency()
+- 主动合成探测 (每服务器查 example.com A), 与真实查询无关;
+  真实查询延迟看 StatsPanel 的 AvgLatencyMs
 - 每条 server 一行: URL | 延迟柱状图 | ms | status
 - 柱状图颜色: <20ms 绿色, <100ms 橙色, >100ms 红色
 

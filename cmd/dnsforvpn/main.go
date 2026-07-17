@@ -1,174 +1,193 @@
+// dnsforvpn — DNS-over-HTTPS proxy with a built-in web UI.
+//
+// Usage:
+//
+//	dnsforvpn [--config PATH] [--no-browser]     run in foreground
+//	dnsforvpn service ACTION [--config PATH]     manage the system service
+//
+// Service actions: install, uninstall, start, stop, restart, status.
+// When run as a system service the browser is never opened and the
+// configured paths are resolved relative to the config file.
 package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"log/slog"
 	"os"
-	"os/signal"
-	"syscall"
+	"path/filepath"
 	"time"
 
-	"doh-dns-proxy/internal/cache"
-	"doh-dns-proxy/internal/query"
-	"doh-dns-proxy/internal/router"
-	"doh-dns-proxy/internal/transport"
-	"doh-dns-proxy/internal/upstream"
-	"doh-dns-proxy/internal/upstream/doh"
-	"doh-dns-proxy/internal/upstream/udp"
+	"doh-dns-proxy/internal/browser"
+	"doh-dns-proxy/internal/control"
+	"doh-dns-proxy/internal/web"
 
-	"github.com/BurntSushi/toml"
+	"github.com/kardianos/service"
 )
 
-// Config mirrors the TOML structure.
-type Config struct {
-	DOHServers DOHServers `toml:"doh_servers"`
-	DNS        DNSConfig  `toml:"dns"`
-	Cache      CacheConfig `toml:"cache"`
-	Proxy      ProxyConfig `toml:"proxy"`
-	Logging    LogConfig   `toml:"logging"`
-}
-
-type DOHServers struct {
-	DirectServers   []string `toml:"direct_servers"`
-	ProxyServers    []string `toml:"proxy_servers"`
-	BootstrapServer string   `toml:"bootstrap_server"`
-}
-
-type DNSConfig struct {
-	Host string `toml:"host"`
-	Port int    `toml:"port"`
-}
-
-type CacheConfig struct {
-	DBPath       string `toml:"db_path"`
-	MaxHotSize   int    `toml:"max_hot_size"`
-	SaveInterval int    `toml:"save_interval"`
-}
-
-type ProxyConfig struct {
-	EnableProxy bool   `toml:"enable_proxy"`
-	HTTP        string `toml:"http"`
-	HTTPS       string `toml:"https"`
-	RuleFile    string `toml:"rule_file"`
-	RuleFileURL string `toml:"rule_file_url"`
-}
-
-type LogConfig struct {
-	Level string `toml:"level"`
-}
-
 func main() {
-	// --- Load config ---
-	cfg, err := loadConfig("config.toml")
-	if err != nil {
-		slog.Error("failed to load config", "err", err)
-		os.Exit(1)
+	if len(os.Args) > 1 && os.Args[1] == "service" {
+		serviceCommand(os.Args[2:])
+		return
 	}
+	run(os.Args[1:])
+}
 
-	setupLogging(cfg.Logging)
+// --- foreground / service runtime ---
 
-	// --- Cache layer ---
-	c, err := cache.New(cfg.Cache.DBPath)
-	if err != nil {
-		slog.Error("failed to open cache", "err", err)
-		os.Exit(1)
-	}
-	defer c.Close()
+type program struct {
+	ctl        *control.Control
+	web        *web.Server
+	noBrowser  bool
+	interactive bool
+}
 
-	negCache := cache.NewNegativeCache(300 * time.Second)
+func (p *program) Start(svc service.Service) error {
+	p.interactive = service.Interactive()
+	go p.work()
+	return nil
+}
 
-	// --- Router ---
-	rtr, err := router.New(cfg.Proxy.RuleFile, cfg.Proxy.RuleFileURL)
-	if err != nil {
-		slog.Error("failed to create router", "err", err)
-		os.Exit(1)
-	}
-	slog.Info("router loaded", "rules", rtr.Size())
+func (p *program) work() {
+	cfg := p.ctl.GetConfig()
 
-	// --- Upstream ---
-	proxyURL := ""
-	if cfg.Proxy.EnableProxy {
-		proxyURL = cfg.Proxy.HTTPS
-		if proxyURL == "" {
-			proxyURL = cfg.Proxy.HTTP
+	w := web.New(p.ctl, cfg.Web)
+	if err := w.Start(); err != nil {
+		slog.Error("web UI failed to start", "err", err)
+	} else {
+		p.web = w
+		slog.Info("web UI listening", "url", w.URL())
+		if p.interactive && !p.noBrowser {
+			if err := browser.Open(w.URL()); err != nil {
+				slog.Warn("could not open browser", "err", err)
+			}
 		}
 	}
 
-	directResolvers := make([]upstream.Resolver, 0, len(cfg.DOHServers.DirectServers))
-	for _, s := range cfg.DOHServers.DirectServers {
-		directResolvers = append(directResolvers, doh.New(s, ""))
+	if err := p.ctl.Start(); err != nil {
+		slog.Error("DNS server failed to start", "err", err)
 	}
+}
 
-	proxyResolvers := make([]upstream.Resolver, 0, len(cfg.DOHServers.ProxyServers))
-	for _, s := range cfg.DOHServers.ProxyServers {
-		proxyResolvers = append(proxyResolvers, doh.New(s, proxyURL))
+func (p *program) Stop(svc service.Service) error {
+	if p.web != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = p.web.Shutdown(ctx)
 	}
+	p.ctl.Stop()
+	return nil
+}
 
-	var bootResolver upstream.Resolver
-	if cfg.DOHServers.BootstrapServer != "" {
-		bootResolver = udp.New(cfg.DOHServers.BootstrapServer)
-	}
+func run(args []string) {
+	fs := flag.NewFlagSet("dnsforvpn", flag.ExitOnError)
+	cfgPath := fs.String("config", "configs/config.toml", "path to the config file")
+	noBrowser := fs.Bool("no-browser", false, "do not open the web UI in a browser")
+	_ = fs.Parse(args)
 
-	mgr := upstream.NewManager(directResolvers, proxyResolvers, bootResolver)
-
-	// --- Query service ---
-	customStore, _ := c.(cache.CustomStore)
-	svc := query.New(c, negCache, rtr, mgr, customStore)
-
-	// --- Transport ---
-	srv, err := transport.NewUDPServer(cfg.DNS.Host, cfg.DNS.Port, svc.Handle)
+	ctl, err := control.New(*cfgPath)
 	if err != nil {
-		slog.Error("failed to start UDP server", "err", err)
+		slog.Error("failed to load config", "path", *cfgPath, "err", err)
 		os.Exit(1)
 	}
-	defer srv.Close()
+	setupLogging(ctl.GetConfig().Logging.Level)
 
-	slog.Info("dnsforvpn starting",
-		"host", cfg.DNS.Host,
-		"port", cfg.DNS.Port,
-		"direct_servers", len(cfg.DOHServers.DirectServers),
-		"proxy_servers", len(cfg.DOHServers.ProxyServers),
-	)
-
-	// --- Signal handling ---
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigCh
-		slog.Info("shutting down...")
-		cancel()
-	}()
-
-	// --- Run ---
-	if err := srv.Start(ctx); err != nil && err != context.Canceled {
-		slog.Error("server error", "err", err)
+	absCfg, _ := filepath.Abs(*cfgPath)
+	svc, err := service.New(&program{ctl: ctl, noBrowser: *noBrowser}, serviceConfig(absCfg))
+	if err != nil {
+		slog.Error("service init failed", "err", err)
+		os.Exit(1)
 	}
-	slog.Info("dnsforvpn stopped")
+
+	if err := svc.Run(); err != nil {
+		slog.Error("run failed", "err", err)
+		os.Exit(1)
+	}
 }
 
-func loadConfig(path string) (*Config, error) {
-	var cfg Config
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
-		return nil, err
+// --- service management subcommand ---
+
+func serviceCommand(args []string) {
+	fs := flag.NewFlagSet("service", flag.ExitOnError)
+	cfgPath := fs.String("config", "configs/config.toml", "path to the config file (recorded by install)")
+	_ = fs.Parse(args)
+	rest := fs.Args()
+	if len(rest) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: dnsforvpn service install|uninstall|start|stop|restart|status [--config PATH]")
+		os.Exit(2)
 	}
-	return &cfg, nil
+	action := rest[0]
+
+	absCfg, _ := filepath.Abs(*cfgPath)
+	svc, err := service.New(&program{}, serviceConfig(absCfg))
+	if err != nil {
+		fatal(err)
+	}
+
+	switch action {
+	case "install":
+		err = svc.Install()
+	case "uninstall":
+		err = svc.Uninstall()
+	case "start":
+		err = svc.Start()
+	case "stop":
+		err = svc.Stop()
+	case "restart":
+		err = svc.Restart()
+	case "status":
+		st, serr := svc.Status()
+		if serr != nil {
+			fatal(serr)
+		}
+		switch st {
+		case service.StatusRunning:
+			fmt.Println("running")
+		case service.StatusStopped:
+			fmt.Println("stopped")
+		default:
+			fmt.Println("unknown")
+		}
+		return
+	default:
+		fmt.Fprintln(os.Stderr, "unknown action:", action)
+		os.Exit(2)
+	}
+	if err != nil {
+		fatal(err)
+	}
+	fmt.Println(action, "ok")
 }
 
-func setupLogging(logCfg LogConfig) {
-	level := slog.LevelInfo
-	switch logCfg.Level {
+func serviceConfig(absCfgPath string) *service.Config {
+	return &service.Config{
+		Name:        "dnsforvpn",
+		DisplayName: "DNSforVPN",
+		Description: "DNS-over-HTTPS proxy with GFWList routing and a web UI",
+		Arguments:   []string{"--config", absCfgPath, "--no-browser"},
+		// Paths in the config file are resolved relative to its directory;
+		// setting the working directory keeps any other relative use sane.
+		WorkingDirectory: filepath.Dir(absCfgPath),
+	}
+}
+
+func fatal(err error) {
+	fmt.Fprintln(os.Stderr, "error:", err)
+	os.Exit(1)
+}
+
+func setupLogging(level string) {
+	lvl := slog.LevelInfo
+	switch level {
 	case "debug":
-		level = slog.LevelDebug
+		lvl = slog.LevelDebug
 	case "warn":
-		level = slog.LevelWarn
+		lvl = slog.LevelWarn
 	case "error":
-		level = slog.LevelError
+		lvl = slog.LevelError
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level: level,
+		Level: lvl,
 	})))
 }

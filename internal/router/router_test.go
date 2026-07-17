@@ -198,11 +198,11 @@ func TestParseRules_GFWListSample(t *testing.T) {
 	r.parseRules(content)
 
 	want := map[string]bool{
-		"google.com":       true,
-		"twitter.com":      true,
-		"facebook.com":     true,
-		"youtube.com":      true,
-		"www.dropbox.com":  true, // captured as-is from rule
+		"google.com":      true,
+		"twitter.com":     true,
+		"facebook.com":    true,
+		"youtube.com":     true,
+		"www.dropbox.com": true, // captured as-is from rule
 	}
 
 	for domain, expected := range want {

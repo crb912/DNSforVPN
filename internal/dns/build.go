@@ -15,10 +15,10 @@ var qDomainPtr = []byte{0xc0, 0x0c}
 
 // wireFlags builds the DNS header flags field.
 const (
-	flagQR     = 0x8000 // Query Response
-	flagAA     = 0x0400 // Authoritative Answer (unset)
-	flagRD     = 0x0100 // Recursion Desired
-	flagRA     = 0x0080 // Recursion Available
+	flagQR     = 0x8000                   // Query Response
+	flagAA     = 0x0400                   // Authoritative Answer (unset)
+	flagRD     = 0x0100                   // Recursion Desired
+	flagRA     = 0x0080                   // Recursion Available
 	flagStdRsp = flagQR | flagRD | flagRA // 0x8180
 )
 
@@ -81,9 +81,9 @@ func BuildQuery(domain string, qtype uint16) []byte {
 	var buf bytes.Buffer
 
 	header := make([]byte, 12)
-	binary.BigEndian.PutUint16(header[0:2], 0)       // ID = 0 (caller should randomize)
-	binary.BigEndian.PutUint16(header[2:4], 0x0100)  // standard query, RD=1
-	binary.BigEndian.PutUint16(header[4:6], 1)        // QDCOUNT
+	binary.BigEndian.PutUint16(header[0:2], 0)      // ID = 0 (caller should randomize)
+	binary.BigEndian.PutUint16(header[2:4], 0x0100) // standard query, RD=1
+	binary.BigEndian.PutUint16(header[4:6], 1)      // QDCOUNT
 	buf.Write(header)
 
 	buf.Write(encodeDomainName(domain))

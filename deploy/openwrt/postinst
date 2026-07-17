@@ -1,0 +1,15 @@
+#!/bin/sh
+# postinst: runs on the router after the package files are installed.
+[ -n "$IPKG_INSTROOT" ] && exit 0
+
+/etc/init.d/dnsforvpn enable
+/etc/init.d/dnsforvpn start
+
+cat <<'MSG'
+dnsforvpn installed.
+  Web UI:  http://<router-ip>:8080  (set [web] password in /etc/dnsforvpn/config.toml!)
+  DNS:     127.0.0.1:1553 — forward dnsmasq with:
+             uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#1553'
+             uci commit dhcp && /etc/init.d/dnsmasq restart
+MSG
+exit 0

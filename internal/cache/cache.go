@@ -18,10 +18,10 @@ type Entry struct {
 
 // Stats provides runtime statistics for the cache.
 type Stats struct {
-	Size      int64   // number of entries currently cached
-	HitRate   float64 // cache hit ratio over the last window (0.0 - 1.0)
-	MemBytes  int64   // estimated hot-cache memory usage
-	DiskBytes int64   // on-disk database file size
+	Size      int64   `json:"size"`       // number of entries currently cached
+	HitRate   float64 `json:"hit_rate"`   // cache hit ratio over the last window (0.0 - 1.0)
+	MemBytes  int64   `json:"mem_bytes"`  // estimated hot-cache memory usage
+	DiskBytes int64   `json:"disk_bytes"` // on-disk database file size
 }
 
 // Expired returns true if the entry's TTL has passed.

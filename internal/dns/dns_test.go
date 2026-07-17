@@ -499,11 +499,11 @@ func TestParseResponse_RealGoogleDoHResponse(t *testing.T) {
 		0x00, 0x01, // QTYPE = A
 		0x00, 0x01, // QCLASS = IN
 		// Answer section
-		0xc0, 0x0c,       // compression pointer to google.com
-		0x00, 0x01,       // TYPE = A
-		0x00, 0x01,       // CLASS = IN
+		0xc0, 0x0c, // compression pointer to google.com
+		0x00, 0x01, // TYPE = A
+		0x00, 0x01, // CLASS = IN
 		0x00, 0x00, 0x01, 0x2c, // TTL = 300
-		0x00, 0x04,             // RDLENGTH = 4
+		0x00, 0x04, // RDLENGTH = 4
 		0x8e, 0xfa, 0x50, 0x2e, // 142.250.80.46
 	}
 

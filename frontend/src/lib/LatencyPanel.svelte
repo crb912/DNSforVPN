@@ -1,16 +1,15 @@
 <script>
   import { onMount } from 'svelte';
+  import * as api from '../api.js';
 
-  let go = window.go?.main?.App;
   let latencies = [];
   let loading = false;
   let timer;
 
   async function refresh() {
-    if (!go) return;
     loading = true;
     try {
-      latencies = await go.CheckLatency();
+      latencies = (await api.CheckLatency()) ?? [];
     } catch { latencies = []; }
     loading = false;
   }
@@ -35,7 +34,7 @@
 
 <div class="latency">
   <header>
-    <h3>Server Latency</h3>
+    <h3>DNS Server Latency</h3>
     <button class="refresh" on:click={refresh} disabled={loading}>
       {loading ? '...' : 'Refresh'}
     </button>

@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
+  import * as api from '../api.js';
 
-  let go = window.go?.main?.App;
   let entries = [];
   let domain = '';
   let ips = '';
@@ -9,9 +9,8 @@
   let notice = '';
 
   async function refresh() {
-    if (!go) return;
     try {
-      entries = (await go.GetCustomDNS()) ?? [];
+      entries = (await api.GetCustomDNS()) ?? [];
     } catch (e) {
       error = String(e);
     }
@@ -20,12 +19,11 @@
   onMount(refresh);
 
   async function save() {
-    if (!go) return;
     error = '';
     notice = '';
     const list = ips.split(',').map(s => s.trim()).filter(s => s !== '');
     try {
-      await go.SetCustomDNS(domain.trim(), list);
+      await api.SetCustomDNS(domain.trim(), list);
       notice = `Saved: ${domain.trim().toLowerCase()}`;
       domain = '';
       ips = '';
@@ -36,11 +34,10 @@
   }
 
   async function remove(d) {
-    if (!go) return;
     error = '';
     notice = '';
     try {
-      await go.DeleteCustomDNS(d);
+      await api.DeleteCustomDNS(d);
       notice = `Deleted: ${d}`;
       await refresh();
     } catch (e) {

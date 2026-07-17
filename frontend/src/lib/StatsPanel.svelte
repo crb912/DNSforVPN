@@ -1,16 +1,15 @@
 <script>
   import { onMount } from 'svelte';
+  import * as api from '../api.js';
 
-  let go = window.go?.main?.App;
   let cacheStats = { size: 0, hit_rate: 0, mem_bytes: 0, disk_bytes: 0 };
   let queryStats = { total_queries: 0, cache_hits: 0, cache_misses: 0, total_errors: 0, avg_latency_ms: 0 };
   let timer;
 
   async function refresh() {
-    if (!go) return;
     try {
-      cacheStats = await go.GetCacheStats();
-      queryStats = await go.GetQueryStats();
+      cacheStats = await api.GetCacheStats();
+      queryStats = await api.GetQueryStats();
     } catch { /* server not started yet */ }
   }
 

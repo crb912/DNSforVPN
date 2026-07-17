@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import * as api from './api.js';
   import ConfigPanel from './lib/ConfigPanel.svelte';
   import LatencyPanel from './lib/LatencyPanel.svelte';
   import StatsPanel from './lib/StatsPanel.svelte';
@@ -8,35 +9,32 @@
 
   let activeTab = 'status';
 
-  // Wails bridge — available at runtime.
-  let go = window.go?.main?.App;
-
   let status = 'stopped';
   let statusTimer;
 
   onMount(() => {
-    if (!go) {
-      status = 'wails not available';
-      return;
-    }
-    // Poll status every 2s.
-    statusTimer = setInterval(async () => {
+    const poll = async () => {
       try {
-        status = await go.GetStatus();
+        status = await api.GetStatus();
       } catch { status = 'error'; }
-    }, 2000);
+    };
+    poll();
+    statusTimer = setInterval(poll, 2000);
+    return () => clearInterval(statusTimer);
   });
 
-  function handleStart() {
-    if (!go) return;
-    go.Start().catch(err => {
-      status = 'start error: ' + err;
-    });
+  async function handleStart() {
+    try {
+      status = await api.Start();
+    } catch (err) {
+      status = 'start error: ' + err.message;
+    }
   }
 
-  function handleStop() {
-    if (!go) return;
-    go.Stop();
+  async function handleStop() {
+    try {
+      status = await api.Stop();
+    } catch { /* poll will refresh */ }
   }
 
   const tabs = [

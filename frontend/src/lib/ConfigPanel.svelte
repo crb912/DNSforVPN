@@ -1,25 +1,28 @@
 <script>
-  let go = window.go?.main?.App;
+  import { onMount } from 'svelte';
+  import * as api from '../api.js';
+
   let config = {
     doh_servers: { direct_servers: [], proxy_servers: [], bootstrap_server: '' },
     dns: { host: '0.0.0.0', port: 53 },
     cache: { db_path: 'data/dns_cache.db', max_hot_size: 100000, save_interval: 72 },
     proxy: { enable_proxy: false, http: '', https: '', rule_file: 'gfwlist.txt', rule_file_url: '' },
+    web: { host: '127.0.0.1', port: 8080, username: '', password: '' },
     logging: { level: 'info' },
   };
   let saved = false;
   let error = '';
 
+  onMount(load);
+
   async function load() {
-    if (!go) return;
-    try { config = await go.GetConfig(); } catch (e) { error = String(e); }
+    try { config = await api.GetConfig(); } catch (e) { error = String(e); }
   }
 
   async function save() {
-    if (!go) return;
     error = '';
     try {
-      await go.SaveConfig(config);
+      await api.SaveConfig(config);
       saved = true;
       setTimeout(() => (saved = false), 2000);
     } catch (e) { error = String(e); }
@@ -76,6 +79,12 @@
   <label>DB Path: <input bind:value={config.cache.db_path} /></label>
   <label>Hot Size: <input type="number" bind:value={config.cache.max_hot_size} /></label>
   <label>Save Interval (h): <input type="number" bind:value={config.cache.save_interval} /></label>
+
+  <h3>Web UI</h3>
+  <label>Host: <input bind:value={config.web.host} placeholder="127.0.0.1" /></label>
+  <label>Port: <input type="number" bind:value={config.web.port} placeholder="8080" /></label>
+  <label>Username: <input bind:value={config.web.username} placeholder="(optional)" /></label>
+  <label>Password: <input type="password" bind:value={config.web.password} placeholder="(empty = no auth)" /></label>
 
   <h3>Logging</h3>
   <select bind:value={config.logging.level}>

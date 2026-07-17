@@ -1,18 +1,17 @@
 <script>
   import { onMount } from 'svelte';
+  import * as api from '../api.js';
 
-  let go = window.go?.main?.App;
   let entries = [];
   let filter = '';
   let error = '';
   let loading = false;
 
   async function refresh() {
-    if (!go) return;
     loading = true;
     error = '';
     try {
-      entries = (await go.ListCache()) ?? [];
+      entries = (await api.ListCache()) ?? [];
     } catch (e) {
       error = String(e);
     } finally {
