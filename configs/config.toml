@@ -1,45 +1,30 @@
-# DNSforVPN 配置。本文件位于 configs/ 目录:
-#   configs/config.toml   本文件
-#   configs/rules/        规则文件 (gfwlist 种子, 缺失时按 rule_file_url 下载)
-#   configs/data/         运行时数据 (BoltDB 缓存库, 不打包不入库)
-# 以下相对路径一律相对本文件所在目录解析。
-
 [doh_servers]
-direct_servers = [
-    "https://doh.pub/dns-query",       # Tencent DNS
-    "https://dns.alidns.com/dns-query" # Alibaba DNS
-]
-proxy_servers = [
-    "https://dns.google/dns-query",   # Google DNS 
-    "https://1.1.1.1/dns-query",      # Cloudflare DNS
-]
-bootstrap_server = "223.5.5.5"
+  direct_servers = ["https://doh.pub/dns-query", "https://dns.alidns.com/dns-query"]
+  proxy_servers = ["https://1.1.1.1/dns-query", "https://dns.quad9.net/dns-query"]
+  bootstrap_server = "223.5.5.5"
 
 [dns]
-host = "0.0.0.0"
-port = 1553
+  host = "0.0.0.0"
+  port = 5553
+  mode = "rules"
 
 [cache]
-db_path = "data/dns_cache.db"
-max_hot_size = 100000
-save_interval = 1  # hours
+  db_path = "data/dns_cache.db"
+  max_hot_size = 100000
+  save_interval = 1
 
 [proxy]
-enable_proxy = true
-http = "http://127.0.0.1:7899"
-https = "http://127.0.0.1:7899"
-rule_file = "rules/gfwlist.txt"
-rule_file_url = "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt"
+  enable_proxy = true
+  http = "http://192.168.5.8:7899"
+  https = "http://192.168.5.8:7899"
+  rule_file = "rules/gfwlist.txt"
+  rule_file_url = "https://raw.githubusercontent.com/gfwlist/gfwlist/master/gfwlist.txt"
 
 [web]
-# Web UI / REST API listen address.
-# Desktop: 127.0.0.1 (local only). Router: 0.0.0.0 + set a password.
-host = "127.0.0.1"
-port = 8080
-# HTTP Basic auth; active only when password is non-empty.
-username = ""
-password = ""
+  host = "127.0.0.1"
+  port = 8080
+  username = ""
+  password = ""
 
 [logging]
-# log level: debug, info, warn, error
-level = "info"
+  level = "info"

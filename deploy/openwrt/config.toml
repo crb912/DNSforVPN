@@ -1,8 +1,8 @@
 # dnsforvpn — OpenWrt default configuration.
 #
-# DNS listens on 127.0.0.1:1553 so it does not fight dnsmasq for port 53.
+# DNS listens on 127.0.0.1:5553 so it does not fight dnsmasq for port 53.
 # To route all LAN DNS through dnsforvpn, forward dnsmasq to it:
-#   uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#1553'
+#   uci add_list dhcp.@dnsmasq[0].server='127.0.0.1#5553'
 #   uci set dhcp.@dnsmasq[0].noresolv='1'
 #   uci commit dhcp && /etc/init.d/dnsmasq restart
 #
@@ -22,7 +22,9 @@ bootstrap_server = "223.5.5.5"
 
 [dns]
 host = "127.0.0.1"
-port = 1553
+port = 5553
+mode = "rules"  # direct = all queries to direct_servers / proxy = all to
+                # proxy_servers / rules = GFWList-based split routing
 
 [cache]
 # 相对路径按本文件所在目录 (/etc/dnsforvpn) 解析

@@ -1,37 +1,41 @@
-#!/usr/bin/env bash
-# Installs dnsforvpn on a Linux desktop/server:
-#   - binary + config under /opt/dnsforvpn
-#   - systemd service via the binary's own `service install` (Model B)
-#   - app-menu launcher that opens the web UI
-#
-# Usage: sudo deploy/linux/install.sh <path-to-dnsforvpn-binary>
-set -euo pipefail
-cd "$(dirname "$0")/../.."
+#!/bin/sh
+# Installs dnsforvpn: binary + config under /opt/dnsforvpn, systemd service
+# via the binary's own `service install`.
+# Usage: sudo ./install.sh   (from the directory this script is in)
+set -eu
 
-BIN=${1:?"usage: sudo deploy/linux/install.sh <path-to-dnsforvpn-binary>"}
 PREFIX=/opt/dnsforvpn
+SRC=$(cd "$(dirname "$0")" && pwd)
 
-if [ "$EUID" -ne 0 ]; then
-	echo "please run as root (sudo)" >&2
-	exit 1
+if [ "$(id -u)" -ne 0 ]; then
+    echo "please run as root (sudo)" >&2
+    exit 1
 fi
 
 echo ">> installing to $PREFIX"
 install -d "$PREFIX" "$PREFIX/rules" "$PREFIX/data"
-install -m 0755 "$BIN" "$PREFIX/dnsforvpn"
+install -m 0755 "$SRC/dnsforvpn" "$PREFIX/dnsforvpn"
+install -m 0755 "$SRC/uninstall.sh" "$PREFIX/uninstall.sh"
+# Keep an existing config/rules on reinstall (Web UI edits survive upgrades).
 if [ ! -f "$PREFIX/config.toml" ]; then
-	install -m 0644 configs/config.toml "$PREFIX/config.toml"
+    install -m 0644 "$SRC/config.toml" "$PREFIX/config.toml"
 fi
-# Rule seed: install only if absent (the router refreshes it in place).
 if [ ! -f "$PREFIX/rules/gfwlist.txt" ]; then
-	install -m 0644 configs/rules/gfwlist.txt "$PREFIX/rules/gfwlist.txt"
+    install -m 0644 "$SRC/rules/gfwlist.txt" "$PREFIX/rules/gfwlist.txt"
 fi
 
-echo ">> installing icon + launcher"
-install -Dm 0644 frontend/public/icons/icon-512.png \
-	/usr/share/icons/hicolor/512x512/apps/dnsforvpn.png
-install -Dm 0644 deploy/linux/dnsforvpn.desktop \
-	/usr/share/applications/dnsforvpn.desktop
+echo ">> installing app-menu launcher"
+install -Dm 0644 "$SRC/icon.png" /usr/share/icons/hicolor/512x512/apps/dnsforvpn.png
+cat > /usr/share/applications/dnsforvpn.desktop <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=DNSforVPN
+Comment=DoH proxy with GFWList routing and a web UI
+Exec=xdg-open http://127.0.0.1:8080
+Icon=dnsforvpn
+Terminal=false
+Categories=Network;
+DESKTOP
 
 echo ">> registering systemd service"
 "$PREFIX/dnsforvpn" service install --config "$PREFIX/config.toml"
@@ -41,7 +45,8 @@ cat <<EOF
 
 dnsforvpn installed.
   Web UI:  http://127.0.0.1:8080
+  DNS:     0.0.0.0:5553 — upstream-only; point your system/dnsmasq DNS at it.
   Config:  $PREFIX/config.toml
-  Service: $PREFIX/dnsforvpn service {status|stop|start|restart|uninstall}
-           (or systemctl status dnsforvpn)
+  Service: systemctl status dnsforvpn
+  Remove:  sudo $PREFIX/uninstall.sh
 EOF

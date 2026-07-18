@@ -1,10 +1,8 @@
 # --- 构建产物 ---
 # 主二进制 (go build -o dnsforvpn ./cmd/dnsforvpn/)
 /dnsforvpn
-# OpenWrt ipk 输出 (deploy/openwrt/build-ipk.sh)
-/*.ipk
-# macOS .app 输出 (deploy/macos/make-app.sh)
-/DNSforVPN.app
+# make <os> 输出目录 (build/linux, build/windows, build/macos, build/openwrt)
+/build/
 # vite 构建输出 (main 通过 frontend/embed.go 内嵌; 保留占位 index.html 使裸克隆可编译)
 frontend/dist/*
 !frontend/dist/index.html

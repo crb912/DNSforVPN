@@ -71,14 +71,15 @@ dnsforvpn/                          # module: doh-dns-proxy, go 1.22+
 │
 ├── tools/
 │   ├── genicons/main.go            # 程序化生成图标 (PNG + ICO, 4x 超采样)
-│   ├── dnsprobe/main.go            # UDP DNS 探测 (替代不可靠的 nslookup -port)
-│   └── mkipk/main.go               # 免 SDK 组装 OpenWrt .ipk (纯 Go ar+tar.gz)
+│   └── dnsprobe/main.go            # UDP DNS 探测 (替代不可靠的 nslookup -port)
 │
-└── deploy/
-    ├── openwrt/                    # build-ipk.sh + control + procd init + postinst/prerm + 路由器 config
-    ├── windows/                    # installer.nsi + dnsforvpn.ico
-    ├── linux/                      # install.sh / uninstall.sh + dnsforvpn.desktop
-    └── macos/                      # make-app.sh (web UI launcher .app)
+├── Makefile                        # 唯一构建入口: linux/windows/macos/openwrt/run/clean
+│
+└── deploy/                         # 各平台安装脚本 (make 时拷进 build/<os>/ 随二进制分发)
+    ├── openwrt/                    # install.sh/uninstall.sh + dnsforvpn.init (procd) + 路由版 config
+    ├── windows/                    # install.bat / uninstall.bat
+    ├── linux/                      # install.sh / uninstall.sh
+    └── macos/                      # install.sh / uninstall.sh
 ```
 
 ---
@@ -275,8 +276,10 @@ type Stats struct {
     AvgLatencyMs float64 `json:"avg_latency_ms"`
 }
 
-type Service struct { ... }        // + custom cache.CustomStore (可选, nil 禁用)
-func New(c cache.Cache, nc *cache.NegativeCache, r *router.Router, u *upstream.Manager, cs cache.CustomStore) *Service
+type Service struct { ... }        // + custom cache.CustomStore (可选, nil 禁用), mode (见下)
+// DNS 模式: ModeDirect="direct" (全部直连组) / ModeProxy="proxy" (全部代理组)
+//   / ModeRules="rules" (gfwlist 分流; 空或未知值按 rules)
+func New(c cache.Cache, nc *cache.NegativeCache, r *router.Router, u *upstream.Manager, cs cache.CustomStore, mode string) *Service
 func (s *Service) Handle(ctx, packet, clientAddr) ([]byte, error)  // 完整管线
 func (s *Service) Stats() Stats
 func (s *Service) CacheStats() cache.Stats
@@ -287,7 +290,7 @@ func (s *Service) Shutdown() error
 ```
 1.  dns.ParseQuery(packet)
 1b. custom.CustomGet(domain) → 用户自定义覆盖命中直接返回 (A/AAAA, 最高优先级)
-2.  router.Route(q.Domain) → 选择 direct/proxy []Resolver
+2.  mode 选池: direct→Direct() / proxy→Proxy() / rules→router.Route(q.Domain) 决定
 3.  inflight dedup: sync.Map.LoadOrStore → 等待或接管
 4.  negCache.Get(q.Domain) → NXDOMAIN 命中直接返回
 5.  cache.Get(q.Domain, q.Type) → 热命中返回 / 过期返回+后台刷新
@@ -366,7 +369,7 @@ PUT    /api/config              body=Config → 保存写盘
 GET    /api/status              → "running" | "stopped"
 POST   /api/start               → 启动 DNS → status
 POST   /api/stop                → 停止 DNS → status
-GET    /api/latency             → []ServerLatency (全部 DoH 服务器)
+GET    /api/latency             → []ServerLatency (全部已配置 DoH 服务器)
 GET    /api/stats/cache         → cache.Stats
 GET    /api/stats/query         → query.Stats
 GET    /api/cache?domain=       → []CacheEntryView (domain 为空 = 全量, cap 500)
@@ -396,7 +399,8 @@ bootstrap_server = "223.5.5.5"
 
 [dns]
 host = "0.0.0.0"
-port = 1553
+port = 5553
+mode = "rules"   # direct=全部直连组 / proxy=全部代理组 / rules=gfwlist 分流 (默认)
 
 [cache]
 db_path = "data/dns_cache.db"
@@ -469,7 +473,10 @@ cmd/dnsforvpn/main.go
 | 标准库 slog 替代 logrus | 减少外部依赖, Go 1.21+ 内置 |
 | inflight dedup | sync.Map + chan: 无锁竞争, 5 个并发请求只发 1 次上游 |
 | PWA | manifest+sw.js 几十行换"准原生"桌面形态; API 不走缓存 |
-| mkipk 纯 Go 打 ipk | 构建机 (Windows) 无 binutils/OpenWrt SDK; ar 格式手工写 |
+| mkipk 纯 Go 打 ipk | ~~构建机 (Windows) 无 binutils/OpenWrt SDK~~ 已废弃: 2026-07-18 起统一"二进制+脚本"分发 |
+| 二进制+install脚本分发 | 删 NSIS/ipk/.app/.desktop: 四个平台同一形态, 服务注册本就在二进制内 (kardianos), 脚本只做复制+调用; PWA 已覆盖桌面图标场景 |
+| Makefile 构建 | make linux/windows/macos/openwrt → build/<os>/ (二进制+config+rules+脚本); make run 按 uname 选宿主目标; 配置 cp -n 不覆盖保住 Web UI 修改 |
+| DNS 默认 5553 上游定位 | 不抢 53; 由 dnsmasq/系统 DNS 转发, 用户手动接线 (dnsmasq: server=127.0.0.1#5553 + noresolv=1) |
 
 ---
 
@@ -521,22 +528,33 @@ dig @127.0.0.1 google.com A
 ## 七、前端面板设计
 
 ### ConfigPanel
-- Load Config 按钮 → GetConfig()
-- DNS Listen: Host + Port
-- Direct DoH Servers: 可编辑列表 (+/-)
-- Proxy DoH Servers: 可编辑列表 (+/-)
+- 顶部工具栏: Load Config + Save Config (✓ Saved / error 提示同排)
+- DNS Listen: Host + Port; DNS Mode 单选 (radio: direct/proxy/rules,
+  bind:group=config.dns.mode, 旧配置缺 mode 时 load 后补 "rules")
+- Direct/Proxy DoH Servers: 候选列表 (共享 doh-catalog.js CATALOG + 配置中
+  目录外的自定义 URL); 勾选=写入 config (Save 后生效); 全部行可 × 删除 —
+  自定义行移出 config, 目录行移出 config 并隐藏 (localStorage
+  `config.hiddenCatalog.v1`, + Add 重新添加同 URL 可恢复); 每组底部输入框
+  (+ Add / Enter) 添加自定义 DoH, 添加即勾选
 - Bootstrap server
 - Proxy toggle + HTTP/HTTPS URL
 - Cache: DB path, hot size, save interval
+- Web UI: host/port/username/password
 - Logging level dropdown
-- Save Config → SaveConfig() → 写入 config.toml
+- Save Config → SaveConfig() → 写入 config.toml (需重启生效)
 
 ### LatencyPanel
-- 标题 "DNS Server Latency"; 每 5 秒轮询 CheckLatency()
-- 主动合成探测 (每服务器查 example.com A), 与真实查询无关;
+- 标题 "DNS Server Latency"; 手动刷新: onMount 自动测一次 + Refresh 按钮,
+  无轮询
+- 只显示当前激活 (已配置) 服务器, 探测走 GET /api/latency (CheckLatency →
+  CheckServersLatency, 按 server|proxy 缓存 DoH 客户端复用 keep-alive
+  热连接); 主动合成探测 (每服务器查 example.com A), 与真实查询无关;
   真实查询延迟看 StatsPanel 的 AvgLatencyMs
-- 每条 server 一行: URL | 延迟柱状图 | ms | status
-- 柱状图颜色: <20ms 绿色, <100ms 橙色, >100ms 红色
+- 分组展示 Direct/Proxy 带 SVG 图标; 名称命中 doh-catalog.js 目录显示目录名,
+  否则 hostname; 每条 server 一行: name | URL | 延迟柱状图 | ms | status;
+  无激活服务器时显示提示
+- 柱状图颜色 (按热连接校准): <100ms 绿, <300ms 橙, 其余红
+  (direct 热 ~50-100ms, proxy 热 ~200-300ms)
 
 ### StatsPanel
 - 每 5 秒轮询 GetQueryStats() + GetCacheStats()

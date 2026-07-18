@@ -48,6 +48,10 @@ type DOHServers struct {
 type DNSConfig struct {
 	Host string `toml:"host" json:"host"`
 	Port int    `toml:"port" json:"port"`
+	// Mode selects the upstream pool for all queries: "direct" (direct
+	// servers only), "proxy" (proxy servers only) or "rules" (GFWList
+	// routing; default when empty).
+	Mode string `toml:"mode" json:"mode"`
 }
 
 type CacheConfig struct {
@@ -223,7 +227,7 @@ func (c *Control) Start() error {
 
 	// Query service.
 	customStore, _ := cc.(cache.CustomStore)
-	svc := query.New(cc, negCache, rtr, mgr, customStore)
+	svc := query.New(cc, negCache, rtr, mgr, customStore, cfg.DNS.Mode)
 
 	// Transport.
 	srv, err := transport.NewUDPServer(cfg.DNS.Host, cfg.DNS.Port, svc.Handle)
@@ -252,6 +256,7 @@ func (c *Control) Start() error {
 	slog.Info("DNS server started",
 		"host", cfg.DNS.Host,
 		"port", cfg.DNS.Port,
+		"mode", cfg.DNS.Mode,
 		"direct", len(cfg.DOHServers.DirectServers),
 		"proxy", len(cfg.DOHServers.ProxyServers),
 	)

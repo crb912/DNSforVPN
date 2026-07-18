@@ -28,6 +28,14 @@ type Stats struct {
 	AvgLatencyMs float64 `json:"avg_latency_ms"`
 }
 
+// DNS modes select which upstream pool serves queries. They mirror the
+// [dns] mode values in config.toml.
+const (
+	ModeDirect = "direct" // every query goes to the direct servers
+	ModeProxy  = "proxy"  // every query goes to the proxy servers
+	ModeRules  = "rules"  // GFWList routing decides per domain
+)
+
 // Service orchestrates the full DNS query pipeline.
 type Service struct {
 	cache    cache.Cache
@@ -35,6 +43,7 @@ type Service struct {
 	router   *router.Router
 	upstream *upstream.Manager
 	custom   cache.CustomStore // optional user-defined DNS overrides (may be nil)
+	mode     string            // ModeDirect / ModeProxy / ModeRules
 
 	// In-flight deduplication: domain|qtype → chan closed when upstream
 	// resolve completes. Subsequent queries for the same key wait on
@@ -51,13 +60,16 @@ type Service struct {
 }
 
 // New creates a Service with all required dependencies. The custom store
-// is optional — pass nil to disable user-defined DNS overrides.
+// is optional — pass nil to disable user-defined DNS overrides. mode is one
+// of ModeDirect/ModeProxy/ModeRules; empty or unknown values fall back to
+// ModeRules.
 func New(
 	c cache.Cache,
 	nc *cache.NegativeCache,
 	r *router.Router,
 	u *upstream.Manager,
 	cs cache.CustomStore,
+	mode string,
 ) *Service {
 	return &Service{
 		cache:    c,
@@ -65,6 +77,7 @@ func New(
 		router:   r,
 		upstream: u,
 		custom:   cs,
+		mode:     mode,
 	}
 }
 
@@ -96,14 +109,20 @@ func (s *Service) Handle(ctx context.Context, packet []byte, clientAddr net.Addr
 		}
 	}
 
-	// 2. Route: pick which resolver pool to use.
-	decision := s.router.Route(q.Domain)
+	// 2. Route: pick which resolver pool to use. In rules mode the GFWList
+	// router decides per domain; the other modes pin every query to one pool.
 	var resolvers []upstream.Resolver
-	switch decision.Decision {
-	case router.RouteProxy:
-		resolvers = s.upstream.Proxy()
-	default:
+	switch s.mode {
+	case ModeDirect:
 		resolvers = s.upstream.Direct()
+	case ModeProxy:
+		resolvers = s.upstream.Proxy()
+	default: // ModeRules (also empty/unknown values)
+		if s.router.Route(q.Domain).Decision == router.RouteProxy {
+			resolvers = s.upstream.Proxy()
+		} else {
+			resolvers = s.upstream.Direct()
+		}
 	}
 
 	// 2b. In-flight deduplication: if another goroutine is already

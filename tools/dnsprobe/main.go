@@ -4,7 +4,7 @@
 //
 // Usage:
 //
-//	go run ./tools/dnsprobe -server 127.0.0.1:1553 -type A example.com
+//	go run ./tools/dnsprobe -server 127.0.0.1:5553 -type A example.com
 package main
 
 import (
@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	server := flag.String("server", "127.0.0.1:1553", "DNS server host:port")
+	server := flag.String("server", "127.0.0.1:5553", "DNS server host:port")
 	qtype := flag.String("type", "A", "query type: A, AAAA or CNAME")
 	timeout := flag.Duration("timeout", 3*time.Second, "UDP deadline")
 	flag.Parse()

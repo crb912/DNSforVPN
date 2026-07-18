@@ -3,7 +3,7 @@
 # configuration and cache database.
 set -eu
 
-PREFIX=/opt/dnsforvpn
+PREFIX=/usr/local/dnsforvpn
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "please run as root (sudo)" >&2
@@ -15,8 +15,6 @@ if [ -x "$PREFIX/dnsforvpn" ]; then
     "$PREFIX/dnsforvpn" service uninstall || true
 fi
 
-rm -f /usr/share/applications/dnsforvpn.desktop
-rm -f /usr/share/icons/hicolor/512x512/apps/dnsforvpn.png
-
+rm -rf /Applications/DNSforVPN.app
 rm -rf "$PREFIX"
 echo "dnsforvpn removed (service, binary, config, cache, launcher)."

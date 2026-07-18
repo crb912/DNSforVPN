@@ -2,7 +2,7 @@
 // - App shell (static assets): cache-first, hashed filenames make this safe.
 // - /api/*: always network (live DNS data must never be cached).
 
-const CACHE = 'dnsforvpn-v1';
+const CACHE = 'dnsforvpn-v3';
 const SHELL = ['/', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => {
